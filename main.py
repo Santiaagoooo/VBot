@@ -13,7 +13,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 TOKEN = os.getenv("BOT_TOKEN")
 PHOTO_ID = "AgACAgIAAxkBAAMvaXgIu6Ut4n2qlM_75xNZ122a0V8AArwOaxt0MMFLevqSfKlTDL8BAAMCAAN4AAM4BA"
-ADMIN_IDS = {8333234325}
+ADMIN_IDS = {8437167194}
 
 ROLES = {
     "admin": "ADMIN",
