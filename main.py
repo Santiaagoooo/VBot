@@ -3,11 +3,7 @@ import uuid
 import os
 
 from aiogram import Bot, Dispatcher, F, Router, types
-from aiogram.types import (
-    InlineKeyboardMarkup,
-    InlineKeyboardButton,
-    InputMediaPhoto,
-)
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.client.default import DefaultBotProperties
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
@@ -16,9 +12,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 # ================== CONFIG ==================
 
 TOKEN = os.getenv("BOT_TOKEN")
-
 PHOTO_ID = "AgACAgIAAxkBAAEg2HRpf90RVkQ9NI9fz-4Jo4-wMqbgdgAC2xJrG9oTAAFI4II2WPjainsBAAMCAAN4AAM4BA"
-
 ADMIN_IDS = {8333234325}
 
 ROLES = {
@@ -26,22 +20,18 @@ ROLES = {
     "worker": "WORKER"
 }
 
-
 def get_user_role(user_id: int) -> str:
     return ROLES["admin"] if user_id in ADMIN_IDS else ROLES["worker"]
-
 
 def main_menu_caption(user: types.User) -> str:
     role = get_user_role(user.id)
     name = user.first_name or "Пользователь"
     username = f"@{user.username}" if user.username else ""
-
     return (
         f"👋 <b>Привет, {name} {username}</b>\n"
         f"🔑 Твоя роль: <b>{role}</b>\n\n"
         "⚡ Доступные действия:"
     )
-
 
 # ================== INIT ==================
 
@@ -60,11 +50,9 @@ class ApplyFSM(StatesGroup):
     experience = State()
     time = State()
 
-
 class LinkFSM(StatesGroup):
     service = State()
     price = State()
-
 
 # ================== KEYBOARDS ==================
 
@@ -76,13 +64,11 @@ def approve_kb(u_id: int):
         ]
     ])
 
-
 def main_menu():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔥 Создать ссылку", callback_data="create_link")],
         [InlineKeyboardButton(text="❤️ Мои объявления", callback_data="my_links")]
     ])
-
 
 def services_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -102,21 +88,35 @@ def services_kb():
         ]
     ])
 
+# ================== SAFE SEND MAIN MENU ==================
+
+async def send_main_menu(user: types.User):
+    """Главное меню с фото, безопасная отправка с паузой."""
+    await asyncio.sleep(0.5)  # пауза, чтобы Telegram подготовил чат
+    try:
+        await bot.send_photo(
+            chat_id=user.id,
+            photo=PHOTO_ID,
+            caption=main_menu_caption(user),
+            reply_markup=main_menu()
+        )
+    except Exception as e:
+        print(f"Ошибка отправки фото главного меню: {e}")
+        await bot.send_message(
+            chat_id=user.id,
+            text=main_menu_caption(user),
+            reply_markup=main_menu()
+        )
 
 # ================== START ==================
 
 @router.message(F.text == "/start")
 async def start(msg: types.Message, state: FSMContext):
     if msg.from_user.id in approved_users:
-        await msg.answer_photo(
-            PHOTO_ID,
-            caption=main_menu_caption(msg.from_user),
-            reply_markup=main_menu()
-        )
+        await send_main_menu(msg.from_user)
     else:
         await state.set_state(ApplyFSM.source)
         await msg.answer("1️⃣ <b>Откуда вы узнали о нас?</b>")
-
 
 # ================== APPLY ==================
 
@@ -126,13 +126,11 @@ async def apply_source(msg: types.Message, state: FSMContext):
     await state.set_state(ApplyFSM.experience)
     await msg.answer("2️⃣ <b>Каков ваш опыт работы?</b>")
 
-
 @router.message(ApplyFSM.experience)
 async def apply_experience(msg: types.Message, state: FSMContext):
     await state.update_data(experience=msg.text)
     await state.set_state(ApplyFSM.time)
     await msg.answer("3️⃣ <b>Сколько времени готовы уделять?</b>")
-
 
 @router.message(ApplyFSM.time)
 async def apply_time(msg: types.Message, state: FSMContext):
@@ -154,7 +152,6 @@ async def apply_time(msg: types.Message, state: FSMContext):
     await msg.answer("✅ Заявка отправлена. Ожидайте решения.")
     await state.clear()
 
-
 # ================== ADMIN ==================
 
 @router.callback_query(F.data.startswith("approve:"))
@@ -164,20 +161,16 @@ async def approve(call: types.CallbackQuery):
         return
 
     user_id = int(call.data.split(":")[1])
-
     approved_users.add(user_id)
 
-    # Главное меню отправляется ТАК, чтобы НЕ было ошибок
+    # Сообщение о принятии заявки
     await bot.send_message(user_id, "✅ <b>Ваша заявка одобрена</b>")
-    await bot.send_photo(
-        chat_id=user_id,
-        photo=PHOTO_ID,
-        caption="🏠 <b>Главное меню</b>",
-        reply_markup=main_menu()
-    )
 
-    await call.answer("Пользователь принят")
+    # Отправка главного меню с фото
+    user_obj = await bot.get_chat(user_id)
+    await send_main_menu(user_obj)
 
+    await call.answer("Принято")
 
 @router.callback_query(F.data.startswith("reject:"))
 async def reject(call: types.CallbackQuery):
@@ -188,7 +181,6 @@ async def reject(call: types.CallbackQuery):
     user_id = int(call.data.split(":")[1])
     await bot.send_message(user_id, "❌ Ваша заявка отклонена")
     await call.answer("Отклонено")
-
 
 # ================== CREATE LINK ==================
 
@@ -202,16 +194,13 @@ async def create_link(call: types.CallbackQuery, state: FSMContext):
     )
     await call.answer()
 
-
 @router.callback_query(F.data.startswith("srv:"))
 async def choose_service(call: types.CallbackQuery, state: FSMContext):
     service = call.data.split(":")[1]
     await state.update_data(service=service)
     await state.set_state(LinkFSM.price)
-
     await call.message.answer(f"💰 Введите стоимость для <b>{service}</b>")
     await call.answer()
-
 
 @router.message(LinkFSM.price)
 async def set_price(msg: types.Message, state: FSMContext):
@@ -230,7 +219,6 @@ async def set_price(msg: types.Message, state: FSMContext):
 
     await msg.answer(f"✅ Ссылка создана\n<b>{data['service']} | {msg.text}₴</b>\n{link}")
     await state.clear()
-
 
 # ================== MY LINKS ==================
 
@@ -259,7 +247,6 @@ async def my_links(call: types.CallbackQuery):
     )
     await call.answer()
 
-
 @router.callback_query(F.data.startswith("del:"))
 async def delete_one(call: types.CallbackQuery):
     idx = int(call.data.split(":")[1])
@@ -267,30 +254,22 @@ async def delete_one(call: types.CallbackQuery):
     await call.answer("Удалено")
     await my_links(call)
 
-
 @router.callback_query(F.data == "del_all")
 async def delete_all(call: types.CallbackQuery):
     user_links[call.from_user.id] = []
     await call.message.answer("📭 Объявлений нет", reply_markup=main_menu())
     await call.answer("Все удалено")
 
-
 # ================== BACK ==================
 
 @router.callback_query(F.data == "back_menu")
 async def back_menu(call: types.CallbackQuery):
-    await call.message.answer_photo(
-        PHOTO_ID,
-        caption=main_menu_caption(call.from_user),
-        reply_markup=main_menu()
-    )
+    await send_main_menu(call.from_user)
     await call.answer()
-
 
 @router.callback_query(F.data == "noop")
 async def noop(call: types.CallbackQuery):
     await call.answer()
-
 
 # ================== RUN ==================
 
@@ -298,7 +277,6 @@ async def main():
     dp.include_router(router)
     print("BOT RUNNING...")
     await dp.start_polling(bot)
-
 
 if __name__ == "__main__":
     asyncio.run(main())
