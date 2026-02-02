@@ -1,5 +1,10 @@
 import asyncio
 import uuid
+import os
+
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from aiogram import Bot, Dispatcher, F, Router, types
 from aiogram.types import (
@@ -14,11 +19,12 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 # ================== CONFIG ==================
 
-import os
-
 TOKEN = os.getenv("BOT_TOKEN")
+ADMIN_ID = int(os.getenv("8437167194"))
+
 PHOTO_ID = "AgACAgIAAxkBAAEg2HRpf90RVkQ9NI9fz-4Jo4-wMqbgdgAC2xJrG9oTAAFI4II2WPjainsBAAMCAAN4AAM4BA"
-ADMIN_IDS = {8333234325}
+
+ADMIN_IDS = {ADMIN_ID}
 
 ROLES = {
     "admin": "ADMIN",
@@ -32,7 +38,6 @@ def get_user_role(user_id: int) -> str:
 
 def main_menu_caption(user: types.User) -> str:
     role = get_user_role(user.id)
-
     name = user.first_name or "Пользователь"
     username = f"@{user.username}" if user.username else ""
 
@@ -64,6 +69,21 @@ class ApplyFSM(StatesGroup):
 class LinkFSM(StatesGroup):
     service = State()
     price = State()
+
+# ================== SAFE EDIT ==================
+
+async def safe_edit(message: types.Message, caption: str, reply_markup=None):
+    """Безопасное редактирование текста или caption."""
+    try:
+        if message.photo:
+            return await message.edit_caption(caption, reply_markup=reply_markup)
+        else:
+            return await message.edit_text(caption, reply_markup=reply_markup)
+    except:
+        try:
+            return await message.edit_text(caption, reply_markup=reply_markup)
+        except:
+            return
 
 # ================== KEYBOARDS ==================
 
@@ -104,14 +124,16 @@ def services_kb():
 @router.message(F.text == "/start")
 async def start(msg: types.Message, state: FSMContext):
     if msg.from_user.id in approved_users:
-        await msg.answer_photo(
-            PHOTO_ID,
+        await bot.send_photo(
+            chat_id=msg.from_user.id,
+            photo=PHOTO_ID,
             caption=main_menu_caption(msg.from_user),
             reply_markup=main_menu()
         )
     else:
         await state.set_state(ApplyFSM.source)
         await msg.answer("1️⃣ <b>Откуда вы узнали о нас?</b>")
+
 # ================== APPLY ==================
 
 @router.message(ApplyFSM.source)
@@ -158,7 +180,14 @@ async def approve(call: types.CallbackQuery):
     approved_users.add(user_id)
 
     await bot.send_message(user_id, "✅ <b>Ваша заявка одобрена</b>")
-    await bot.send_photo(user_id, PHOTO_ID, caption="🏠 Главное меню", reply_markup=main_menu())
+
+    await bot.send_photo(
+        chat_id=user_id,
+        photo=PHOTO_ID,
+        caption=main_menu_caption(call.from_user),
+        reply_markup=main_menu()
+    )
+
     await call.answer("Принято")
 
 @router.callback_query(F.data.startswith("reject:"))
@@ -176,7 +205,7 @@ async def reject(call: types.CallbackQuery):
 @router.callback_query(F.data == "create_link")
 async def create_link(call: types.CallbackQuery, state: FSMContext):
     await state.set_state(LinkFSM.service)
-    await call.message.edit_caption("🔗 <b>Выберите сервис</b>", reply_markup=services_kb())
+    await safe_edit(call.message, "🔗 <b>Выберите сервис</b>", services_kb())
     await call.answer()
 
 @router.callback_query(F.data.startswith("srv:"))
@@ -232,9 +261,10 @@ async def my_links(call: types.CallbackQuery):
     kb.append([InlineKeyboardButton(text="❌ Удалить все", callback_data="del_all")])
     kb.append([InlineKeyboardButton(text="⬅️ В меню", callback_data="back_menu")])
 
-    await call.message.edit_caption(
+    await safe_edit(
+        call.message,
         "📋 <b>Ваши объявления</b>",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
+        InlineKeyboardMarkup(inline_keyboard=kb)
     )
     await call.answer()
 
@@ -248,23 +278,33 @@ async def delete_one(call: types.CallbackQuery):
 @router.callback_query(F.data == "del_all")
 async def delete_all(call: types.CallbackQuery):
     user_links[call.from_user.id] = []
-    await call.message.edit_caption(
-        "📭 Объявлений нет",
-        reply_markup=main_menu()
-    )
+    await safe_edit(call.message, "📭 Объявлений нет", main_menu())
     await call.answer("Все удалено")
 
 # ================== BACK ==================
 
 @router.callback_query(F.data == "back_menu")
 async def back_menu(call: types.CallbackQuery):
-    await call.message.edit_media(
-        InputMediaPhoto(
-            media=PHOTO_ID,
-            caption=main_menu_caption(call.from_user)
-        ),
-        reply_markup=main_menu()
-    )
+    try:
+        if call.message.photo:
+            await call.message.edit_media(
+                InputMediaPhoto(
+                    media=PHOTO_ID,
+                    caption=main_menu_caption(call.from_user)
+                ),
+                reply_markup=main_menu()
+            )
+        else:
+            await call.message.edit_text(
+                main_menu_caption(call.from_user),
+                reply_markup=main_menu()
+            )
+    except:
+        await call.message.answer(
+            main_menu_caption(call.from_user),
+            reply_markup=main_menu()
+        )
+
     await call.answer()
 
 @router.callback_query(F.data == "noop")
