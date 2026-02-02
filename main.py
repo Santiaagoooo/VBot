@@ -12,7 +12,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 # ================== CONFIG ==================
 
 TOKEN = os.getenv("BOT_TOKEN")
-PHOTO_ID = "AgACAgIAAxkBAAEg2HRpf90RVkQ9NI9fz-4Jo4-wMqbgdgAC2xJrG9oTAAFI4II2WPjainsBAAMCAAN4AAM4BA"
+PHOTO_ID = "AgACAgIAAxkBAAMvaXgIu6Ut4n2qlM_75xNZ122a0V8AArwOaxt0MMFLevqSfKlTDL8BAAMCAAN4AAM4BA"
 ADMIN_IDS = {8333234325}
 
 ROLES = {
@@ -24,14 +24,10 @@ def get_user_role(user_id: int) -> str:
     return ROLES["admin"] if user_id in ADMIN_IDS else ROLES["worker"]
 
 def main_menu_caption(user: types.User) -> str:
-    role = get_user_role(user.id)
     name = user.first_name or "Пользователь"
     username = f"@{user.username}" if user.username else ""
-    return (
-        f"👋 <b>Привет, {name} {username}</b>\n"
-        f"🔑 Твоя роль: <b>{role}</b>\n\n"
-        "⚡ Доступные действия:"
-    )
+    role = get_user_role(user.id)
+    return f"👋 <b>Привет, {name} {username}</b>\n🔑 Твоя роль: <b>{role}</b>\n\n⚡ Доступные действия:"
 
 # ================== INIT ==================
 
@@ -56,11 +52,11 @@ class LinkFSM(StatesGroup):
 
 # ================== KEYBOARDS ==================
 
-def approve_kb(u_id: int):
+def approve_kb(user_id: int):
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="✅ Принять", callback_data=f"approve:{u_id}"),
-            InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject:{u_id}")
+            InlineKeyboardButton(text="✅ Принять", callback_data=f"approve:{user_id}"),
+            InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject:{user_id}")
         ]
     ])
 
@@ -91,8 +87,8 @@ def services_kb():
 # ================== SAFE SEND MAIN MENU ==================
 
 async def send_main_menu(user: types.User):
-    """Главное меню с фото, безопасная отправка с паузой."""
-    await asyncio.sleep(0.5)  # пауза, чтобы Telegram подготовил чат
+    """Главное меню с фото, безопасная отправка."""
+    await asyncio.sleep(0.5)  # пауза для нового чата
     try:
         await bot.send_photo(
             chat_id=user.id,
@@ -101,7 +97,7 @@ async def send_main_menu(user: types.User):
             reply_markup=main_menu()
         )
     except Exception as e:
-        print(f"Ошибка отправки фото главного меню: {e}")
+        print(f"Ошибка отправки фото: {e}")
         await bot.send_message(
             chat_id=user.id,
             text=main_menu_caption(user),
@@ -163,10 +159,7 @@ async def approve(call: types.CallbackQuery):
     user_id = int(call.data.split(":")[1])
     approved_users.add(user_id)
 
-    # Сообщение о принятии заявки
     await bot.send_message(user_id, "✅ <b>Ваша заявка одобрена</b>")
-
-    # Отправка главного меню с фото
     user_obj = await bot.get_chat(user_id)
     await send_main_menu(user_obj)
 
@@ -225,15 +218,14 @@ async def set_price(msg: types.Message, state: FSMContext):
 @router.callback_query(F.data == "my_links")
 async def my_links(call: types.CallbackQuery):
     links = user_links.get(call.from_user.id, [])
-
     if not links:
         await call.answer("❌ Нет объявлений", show_alert=True)
         return
 
     kb = []
-    for i, item in enumerate(links):
+    for i, l in enumerate(links):
         kb.append([
-            InlineKeyboardButton(text=f"{item['service']} | {item['price']}₴", callback_data="noop"),
+            InlineKeyboardButton(text=f"{l['service']} | {l['price']}₴", callback_data="noop"),
             InlineKeyboardButton(text="❌ Удалить", callback_data=f"del:{i}")
         ])
 
