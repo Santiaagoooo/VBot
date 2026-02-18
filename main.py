@@ -12,7 +12,10 @@ from aiogram.fsm.storage.memory import MemoryStorage
 # ================== CONFIG ==================
 
 TOKEN = os.getenv("BOT_TOKEN")
-PHOTO_ID = "AgACAgIAAxkBAAMvaXgIu6Ut4n2qlM_75xNZ122a0V8AArwOaxt0MMFLevqSfKlTDL8BAAMCAAN4AAM4BA"
+
+if not TOKEN:
+    raise Exception("❌ BOT_TOKEN не найден! Добавь его в Railway Variables.")
+
 ADMIN_IDS = {8437167194}
 
 ROLES = {
@@ -21,19 +24,28 @@ ROLES = {
 }
 
 def get_user_role(user_id: int) -> str:
-    return ROLES["admin"] if user_id in ADMIN_IDS else ROLES["worker"]
+    if user_id in ADMIN_IDS:
+        return ROLES["admin"]
+    return ROLES["worker"]
 
 def main_menu_caption(user: types.User) -> str:
+    role = get_user_role(user.id)
     name = user.first_name or "Пользователь"
     username = f"@{user.username}" if user.username else ""
-    role = get_user_role(user.id)
-    return f"👋 <b>Привет, {name} {username}</b>\n🔑 Твоя роль: <b>{role}</b>\n\n⚡ Доступные действия:"
+
+    return (
+        f"👋 Привет, {name} {username}\n"
+        f"🔑 Твоя роль: {role}\n\n"
+        "⚡ Доступные действия:"
+    )
 
 # ================== INIT ==================
 
 bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 dp = Dispatcher(storage=MemoryStorage())
 router = Router()
+
+# ================== STORAGE ==================
 
 applications = {}
 approved_users = set()
@@ -84,35 +96,18 @@ def services_kb():
         ]
     ])
 
-# ================== SAFE SEND MAIN MENU ==================
-
-async def send_main_menu(user: types.User):
-    """Главное меню с фото, безопасная отправка."""
-    await asyncio.sleep(0.5)  # пауза для нового чата
-    try:
-        await bot.send_photo(
-            chat_id=user.id,
-            photo=PHOTO_ID,
-            caption=main_menu_caption(user),
-            reply_markup=main_menu()
-        )
-    except Exception as e:
-        print(f"Ошибка отправки фото: {e}")
-        await bot.send_message(
-            chat_id=user.id,
-            text=main_menu_caption(user),
-            reply_markup=main_menu()
-        )
-
 # ================== START ==================
 
 @router.message(F.text == "/start")
 async def start(msg: types.Message, state: FSMContext):
     if msg.from_user.id in approved_users:
-        await send_main_menu(msg.from_user)
+        await msg.answer(
+            main_menu_caption(msg.from_user),
+            reply_markup=main_menu()
+        )
     else:
         await state.set_state(ApplyFSM.source)
-        await msg.answer("1️⃣ <b>Откуда вы узнали о нас?</b>")
+        await msg.answer("1️⃣ Откуда вы узнали о нас?")
 
 # ================== APPLY ==================
 
@@ -120,13 +115,13 @@ async def start(msg: types.Message, state: FSMContext):
 async def apply_source(msg: types.Message, state: FSMContext):
     await state.update_data(source=msg.text)
     await state.set_state(ApplyFSM.experience)
-    await msg.answer("2️⃣ <b>Каков ваш опыт работы?</b>")
+    await msg.answer("2️⃣ Каков ваш опыт работы?")
 
 @router.message(ApplyFSM.experience)
-async def apply_experience(msg: types.Message, state: FSMContext):
+async def apply_exp(msg: types.Message, state: FSMContext):
     await state.update_data(experience=msg.text)
     await state.set_state(ApplyFSM.time)
-    await msg.answer("3️⃣ <b>Сколько времени готовы уделять?</b>")
+    await msg.answer("3️⃣ Сколько времени готовы уделять?")
 
 @router.message(ApplyFSM.time)
 async def apply_time(msg: types.Message, state: FSMContext):
@@ -152,25 +147,14 @@ async def apply_time(msg: types.Message, state: FSMContext):
 
 @router.callback_query(F.data.startswith("approve:"))
 async def approve(call: types.CallbackQuery):
-    if call.from_user.id not in ADMIN_IDS:
-        await call.answer("Нет доступа", show_alert=True)
-        return
-
     user_id = int(call.data.split(":")[1])
     approved_users.add(user_id)
-
-    await bot.send_message(user_id, "✅ <b>Ваша заявка одобрена</b>")
-    user_obj = await bot.get_chat(user_id)
-    await send_main_menu(user_obj)
-
+    await bot.send_message(user_id, "✅ Ваша заявка одобрена")
+    await bot.send_message(user_id, main_menu_caption(call.from_user), reply_markup=main_menu())
     await call.answer("Принято")
 
 @router.callback_query(F.data.startswith("reject:"))
 async def reject(call: types.CallbackQuery):
-    if call.from_user.id not in ADMIN_IDS:
-        await call.answer("Нет доступа", show_alert=True)
-        return
-
     user_id = int(call.data.split(":")[1])
     await bot.send_message(user_id, "❌ Ваша заявка отклонена")
     await call.answer("Отклонено")
@@ -180,11 +164,7 @@ async def reject(call: types.CallbackQuery):
 @router.callback_query(F.data == "create_link")
 async def create_link(call: types.CallbackQuery, state: FSMContext):
     await state.set_state(LinkFSM.service)
-    await call.message.answer_photo(
-        PHOTO_ID,
-        caption="🔗 <b>Выберите сервис</b>",
-        reply_markup=services_kb()
-    )
+    await call.message.answer("🔗 Выберите сервис", reply_markup=services_kb())
     await call.answer()
 
 @router.callback_query(F.data.startswith("srv:"))
@@ -192,7 +172,7 @@ async def choose_service(call: types.CallbackQuery, state: FSMContext):
     service = call.data.split(":")[1]
     await state.update_data(service=service)
     await state.set_state(LinkFSM.price)
-    await call.message.answer(f"💰 Введите стоимость для <b>{service}</b>")
+    await call.message.answer(f"💰 Введите стоимость для {service}")
     await call.answer()
 
 @router.message(LinkFSM.price)
@@ -210,7 +190,7 @@ async def set_price(msg: types.Message, state: FSMContext):
         "link": link
     })
 
-    await msg.answer(f"✅ Ссылка создана\n<b>{data['service']} | {msg.text}₴</b>\n{link}")
+    await msg.answer(f"✅ Ссылка создана\n{data['service']} | {msg.text}₴\n{link}")
     await state.clear()
 
 # ================== MY LINKS ==================
@@ -222,21 +202,19 @@ async def my_links(call: types.CallbackQuery):
         await call.answer("❌ Нет объявлений", show_alert=True)
         return
 
+    text_lines = ["📋 <b>Ваши объявления:</b>\n"]
     kb = []
+
     for i, l in enumerate(links):
+        text_lines.append(f"{i+1}. {l['service']} | {l['price']}₴\n{l['link']}\n")
         kb.append([
-            InlineKeyboardButton(text=f"{l['service']} | {l['price']}₴", callback_data="noop"),
-            InlineKeyboardButton(text="❌ Удалить", callback_data=f"del:{i}")
+            InlineKeyboardButton(text=f"❌ Удалить {i+1}", callback_data=f"del:{i}")
         ])
 
     kb.append([InlineKeyboardButton(text="❌ Удалить все", callback_data="del_all")])
     kb.append([InlineKeyboardButton(text="⬅️ В меню", callback_data="back_menu")])
 
-    await call.message.answer_photo(
-        PHOTO_ID,
-        caption="📋 <b>Ваши объявления</b>",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb)
-    )
+    await call.message.answer("\n".join(text_lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
     await call.answer()
 
 @router.callback_query(F.data.startswith("del:"))
@@ -256,7 +234,7 @@ async def delete_all(call: types.CallbackQuery):
 
 @router.callback_query(F.data == "back_menu")
 async def back_menu(call: types.CallbackQuery):
-    await send_main_menu(call.from_user)
+    await call.message.answer(main_menu_caption(call.from_user), reply_markup=main_menu())
     await call.answer()
 
 @router.callback_query(F.data == "noop")
@@ -267,7 +245,6 @@ async def noop(call: types.CallbackQuery):
 
 async def main():
     dp.include_router(router)
-    print("BOT RUNNING...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
